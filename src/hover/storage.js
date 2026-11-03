@@ -3,9 +3,24 @@ import { dictionaryCacheKey, normalizeDictionary, scheduleReview } from './core.
 import { DUE_WORDS_SQL } from './queries.js';
 
 let database;
+async function loadDatabase() {
+    let lastError;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        try {
+            return await Database.load('sqlite:ctrlhoverdict.db');
+        } catch (error) {
+            lastError = error;
+            await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+        }
+    }
+    throw lastError;
+}
 export function getDatabase() {
     // Schema is applied by the existing Tauri SQL plugin's versioned migrations.
-    database ??= Database.load('sqlite:ctrlhoverdict.db').catch((error) => {
+    // The plugin can still be booting when the first lookup arrives (a tap pressed
+    // during startup is now replayed as soon as the window is ready), so retry
+    // before giving up instead of failing the whole lookup.
+    database ??= loadDatabase().catch((error) => {
         database = null;
         throw error;
     });

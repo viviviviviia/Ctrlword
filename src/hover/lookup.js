@@ -10,6 +10,7 @@ export function createLookup({ prepare, request, readCache, writeCache }) {
             Boolean
         );
         const failures = [];
+        let cacheWarning = '';
         for (const provider of sources) {
             if (options.signal?.aborted) throw new Error('Cancelled');
             options.onProvider?.(provider, failures.slice());
@@ -19,7 +20,15 @@ export function createLookup({ prepare, request, readCache, writeCache }) {
                 try {
                     cached = !options.force && (await readCache(query));
                 } catch {
-                    throw Object.assign(new Error('本地缓存无法读取，请检查数据目录'), { terminal: true });
+                    // A broken or busy cache must never block a lookup: retry once,
+                    // then go straight to the network with a warning.
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                    try {
+                        cached = !options.force && (await readCache(query));
+                    } catch {
+                        cacheWarning = '本地缓存暂时不可用，本次直接查询';
+                        cached = null;
+                    }
                 }
                 if (options.signal?.aborted) throw new Error('Cancelled');
                 if (cached) return cached;
@@ -44,7 +53,8 @@ export function createLookup({ prepare, request, readCache, writeCache }) {
                 }
                 const result = await entry.promise;
                 if (options.signal?.aborted) throw new Error('Cancelled');
-                return result;
+                const warning = cacheWarning || result.cacheWarning;
+                return warning ? { ...result, cacheWarning: warning } : result;
             } catch (error) {
                 if (options.signal?.aborted || /cancel/iu.test(String(error))) throw new Error('Cancelled');
                 if (error.terminal) throw error;
