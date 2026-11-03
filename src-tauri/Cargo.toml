@@ -1,6 +1,6 @@
 [package]
 name = "pot"
-version = "0.1.15"
+version = "0.1.16"
 description = "Ctrlword desktop hover dictionary"
 authors = ["viviviviviia"]
 license = "GPL-3.0-only"

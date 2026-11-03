@@ -35,6 +35,9 @@ impl TriggerGesture {
         self.used = false;
         tapped.then_some(self.origin)
     }
+    pub fn state(&self) -> (bool, bool) {
+        (self.down, self.used)
+    }
     pub fn mouse(&mut self) {
         if self.down {
             self.used = true;

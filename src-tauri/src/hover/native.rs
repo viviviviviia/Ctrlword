@@ -35,8 +35,9 @@ static ACTIVE: AtomicBool = AtomicBool::new(false);
 static HOOK_ENABLED: AtomicBool = AtomicBool::new(false);
 static TAP_MODE: AtomicBool = AtomicBool::new(true);
 static TRIGGER_KEY: AtomicI32 = AtomicI32::new(0xa2);
+static STARTED_AT: Lazy<Instant> = Lazy::new(Instant::now);
 static GESTURE: Lazy<Mutex<TriggerGesture>> = Lazy::new(|| Mutex::new(TriggerGesture::default()));
-static TAPS: Lazy<Mutex<VecDeque<Point>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+static TAPS: Lazy<Mutex<VecDeque<(Instant, Point)>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static CLOSE_REQUEST: AtomicBool = AtomicBool::new(false);
 static STARTED: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static TIMINGS: Lazy<Mutex<Value>> = Lazy::new(|| Mutex::new(json!({})));
@@ -180,7 +181,7 @@ pub fn valid(id: u64) -> bool {
 }
 pub fn ready() {
     READY.store(true, Ordering::SeqCst);
-    log::info!("Ctrlword hover renderer ready");
+    log::info!("Ctrlword hover renderer ready after {}ms", STARTED_AT.elapsed().as_millis());
 }
 pub fn status() -> Value {
     json!({"supported":true,"ready":READY.load(Ordering::SeqCst),"probes":PROBES.load(Ordering::Relaxed),
@@ -279,7 +280,10 @@ unsafe extern "system" fn keyboard_hook(code: i32, w: WPARAM, l: LPARAM) -> LRES
                 value => value as i32,
             };
             if key_code == trigger {
-                log::debug!("Ctrlword trigger key down={down}");
+                log::debug!(
+                    "Ctrlword trigger key down={down} key={key_code} state={:?}",
+                    GESTURE.lock().unwrap().state()
+                );
             }
             if down && key_code != trigger && TAP_MODE.load(Ordering::SeqCst) {
                 CLOSE_REQUEST.store(true, Ordering::SeqCst);
@@ -293,8 +297,9 @@ unsafe extern "system" fn keyboard_hook(code: i32, w: WPARAM, l: LPARAM) -> LRES
                 if TAP_MODE.load(Ordering::SeqCst) {
                     let mut taps = TAPS.lock().unwrap();
                     if taps.len() < 4 {
-                        taps.push_back(p);
+                        taps.push_back((Instant::now(), p));
                         TAP_SEEN.fetch_add(1, Ordering::Relaxed);
+                        log::debug!("Ctrlword tap queued {},{} len={}", p.x, p.y, taps.len());
                     }
                 }
             }
@@ -419,9 +424,10 @@ unsafe fn install_hooks() {
         }
     }
     log::debug!(
-        "Ctrlword hooks installed: keyboard={} mouse={}",
+        "Ctrlword hooks installed: keyboard={} mouse={} after {}ms",
         KEYBOARD_HOOK.load(Ordering::SeqCst) != 0,
-        MOUSE_HOOK.load(Ordering::SeqCst) != 0
+        MOUSE_HOOK.load(Ordering::SeqCst) != 0,
+        STARTED_AT.elapsed().as_millis()
     );
 }
 
@@ -607,37 +613,62 @@ pub fn start(app: tauri::AppHandle) {
                     invalidate_at(&app, "close request");
                 }
             }
-            let taps: Vec<_> = TAPS.lock().unwrap().drain(..).collect();
-            if !taps.is_empty() && !(tap_mode && permitted && !suppressed && READY.load(Ordering::SeqCst)) {
-                log::info!(
-                    "Ctrlword tap ignored: taps={} permitted={} suppressed={} ready={} own_app={} app={}",
-                    taps.len(),
-                    permitted,
-                    suppressed,
-                    READY.load(Ordering::SeqCst),
-                    own_app,
-                    app_name
-                );
-            }
-            if tap_mode && permitted && !suppressed && READY.load(Ordering::SeqCst) {
-                for tapped in taps {
-                    let same_target = TARGET
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map(|rect| rect.contains_lookup(tapped))
-                        .unwrap_or(false);
-                    let old = *POINT_AT_PROBE.lock().unwrap();
-                    let close = ACTIVE.load(Ordering::SeqCst)
-                        && (over
-                            || same_target
-                            || ((tapped.x - old.x).abs() <= 3 && (tapped.y - old.y).abs() <= 3));
-                    invalidate_at(&app, "new tap");
-                    left_at = None;
-                    if !close {
-                        emit_probe(&app, tapped);
-                        previous = tapped;
+            // Keep early taps queued: the renderer takes about a second to boot, and a tap
+            // pressed during that window used to be dropped, which felt like "wait after start".
+            let can_probe = tap_mode && permitted && !suppressed;
+            if can_probe {
+                let ready_now = READY.load(Ordering::SeqCst);
+                let mut queue = TAPS.lock().unwrap();
+                let stale = queue.len();
+                let fresh: Vec<Point> = queue
+                    .iter()
+                    .filter(|(at, _)| at.elapsed() < Duration::from_millis(2500))
+                    .map(|(_, point)| *point)
+                    .collect();
+                if fresh.len() < stale {
+                    queue.retain(|(at, _)| at.elapsed() < Duration::from_millis(2500));
+                }
+                if ready_now {
+                    queue.clear();
+                }
+                drop(queue);
+                if stale > fresh.len() && fresh.is_empty() {
+                    log::debug!("Ctrlword dropped {} stale taps", stale - fresh.len());
+                }
+                if ready_now && !fresh.is_empty() {
+                    for tapped in fresh {
+                        let same_target = TARGET
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .map(|rect| rect.contains_lookup(tapped))
+                            .unwrap_or(false);
+                        let old = *POINT_AT_PROBE.lock().unwrap();
+                        let close = ACTIVE.load(Ordering::SeqCst)
+                            && (over
+                                || same_target
+                                || ((tapped.x - old.x).abs() <= 3 && (tapped.y - old.y).abs() <= 3));
+                        invalidate_at(&app, "new tap");
+                        left_at = None;
+                        if !close {
+                            emit_probe(&app, tapped);
+                            previous = tapped;
+                        }
                     }
+                }
+            } else {
+                let taps: Vec<_> = TAPS.lock().unwrap().drain(..).collect();
+                if !taps.is_empty() {
+                    log::info!(
+                        "Ctrlword tap ignored: taps={} tap_mode={} permitted={} suppressed={} ready={} own_app={} app={}",
+                        taps.len(),
+                        tap_mode,
+                        permitted,
+                        suppressed,
+                        READY.load(Ordering::SeqCst),
+                        own_app,
+                        app_name
+                    );
                 }
             }
             let mut start_drag = false;
