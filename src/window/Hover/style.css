@@ -1,0 +1,180 @@
+.chd-card {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    background: #fcfcfd;
+    color: #1f2937;
+    border: 1px solid #e2e5eb;
+    border-radius: 12px;
+    width: 420px;
+    max-width: 100vw;
+    max-height: min(620px, 100vh);
+    overflow: hidden;
+    font:
+        14px/1.6 'Segoe UI',
+        'Microsoft YaHei',
+        sans-serif;
+}
+.chd-card header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 16px 18px 8px;
+    cursor: grab;
+    user-select: none;
+}
+.chd-card header:active {
+    cursor: grabbing;
+}
+.chd-card h1 {
+    font-size: 25px;
+    line-height: 1.25;
+    font-weight: 650;
+    letter-spacing: -0.4px;
+    overflow-wrap: anywhere;
+}
+.chd-phonetic {
+    color: #667085;
+    font-size: 13px;
+    margin-top: 4px;
+}
+.chd-card button {
+    border: 0;
+    border-radius: 6px;
+    padding: 3px 7px;
+    background: transparent;
+    color: #4962a5;
+    cursor: pointer;
+}
+.chd-card header button {
+    font-size: 24px;
+    line-height: 1;
+    color: #8b95a5;
+}
+.chd-card button:hover {
+    background: #edf0f8;
+}
+.chd-card button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.chd-card main {
+    padding: 0 18px 12px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.chd-sense {
+    display: flex;
+    gap: 9px;
+    margin: 8px 0;
+}
+.chd-sense > span {
+    color: #8c6d9f;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+.chd-card section {
+    border-top: 1px solid #e9ebef;
+    padding-top: 9px;
+    margin-top: 11px;
+}
+.chd-card h2 {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    color: #8b95a5;
+    margin-bottom: 5px;
+}
+.chd-card strong {
+    font-weight: 550;
+}
+.chd-example {
+    margin-bottom: 7px;
+}
+.chd-muted {
+    color: #788295;
+    font-size: 12px;
+}
+.chd-context {
+    font-size: 12px;
+}
+.chd-context p {
+    overflow-wrap: anywhere;
+}
+.chd-card footer {
+    flex-shrink: 0;
+    border-top: 1px solid #e9ebef;
+    padding: 8px 12px 10px;
+}
+.chd-tools {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+}
+.chd-source {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #8b95a5;
+    font-size: 11px;
+    margin: 6px 6px 0;
+}
+.chd-source select {
+    color: #64748b;
+    background: transparent;
+    border: 0;
+    max-width: 270px;
+    padding: 2px;
+}
+.chd-error {
+    color: #a25136;
+    white-space: pre-wrap;
+    margin: 10px 0;
+    font-size: 12px;
+}
+.chd-notice {
+    font-size: 12px;
+    color: #537d66;
+    padding: 4px 6px 0;
+}
+.chd-loading {
+    font-size: 12px;
+    color: #8792a4;
+    padding: 4px 0;
+}
+.chd-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    background: #7d8bb7;
+    border-radius: 50%;
+    margin-right: 7px;
+    animation: chd-pulse 1s infinite alternate;
+}
+@keyframes chd-pulse {
+    to {
+        opacity: 0.25;
+    }
+}
+.dark .chd-card {
+    background: #20252e;
+    color: #e7eaf0;
+    border-color: #3b424f;
+}
+.dark .chd-card section,
+.dark .chd-card footer {
+    border-color: #343c48;
+}
+.dark .chd-card button {
+    color: #a4b4e1;
+}
+.dark .chd-card button:hover {
+    background: #313a4b;
+}
+.dark .chd-source select {
+    color: #acb8ce;
+}
+.dark .chd-source option {
+    background: #20252e;
+}
