@@ -134,13 +134,13 @@ export default function TargetArea(props) {
             )
             .then(
                 (v) => {
-                    db.close();
+                    db.close('sqlite:history.db');
                 },
                 (e) => {
                     db.execute(
                         'CREATE TABLE history(id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL,source TEXT NOT NULL,target TEXT NOT NULL,service TEXT NOT NULL, result TEXT NOT NULL,timestamp INTEGER NOT NULL)'
                     ).then(() => {
-                        db.close();
+                        db.close('sqlite:history.db');
                         addToHistory(text, source, target, serviceInstanceKey, result);
                     });
                 }

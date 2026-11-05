@@ -1,7 +1,7 @@
 {
     "name": "ctrlword",
     "private": true,
-    "version": "0.1.17",
+    "version": "0.1.20",
     "type": "module",
     "packageManager": "pnpm@9.15.9",
     "scripts": {

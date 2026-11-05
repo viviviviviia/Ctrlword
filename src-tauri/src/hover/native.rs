@@ -743,8 +743,11 @@ pub fn start(app: tauri::AppHandle) {
                         left_at = None;
                     }
                 } else {
+                    // Nothing is on screen yet, so a lookup is still loading. Cursor
+                    // jitter of a few pixels used to cancel it before the card could
+                    // appear; only a deliberate move gives up on this probe.
                     let anchor = *POINT_AT_PROBE.lock().unwrap();
-                    if (p.x - anchor.x).abs() > 6 || (p.y - anchor.y).abs() > 6 {
+                    if (p.x - anchor.x).abs() > 60 || (p.y - anchor.y).abs() > 60 {
                         invalidate_at(&app, "anchor moved");
                     }
                 }
@@ -1001,12 +1004,37 @@ pub fn capture(app: tauri::AppHandle, id: u64, context: bool) -> Result<CaptureR
         std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         let path = folder.join(format!("hover_{id}_{}.png", u8::from(context)));
         std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-        match recognize_file(&path, &s.ocr_language) {
-            Ok((result, language)) => {
-                words = result;
-                used_ocr_language = Some(language);
+        // Windows OCR occasionally never answers on a bad frame. A single
+        // long-lived worker keeps at most one such call pending, and after a
+        // timeout the session stops using the system engine instead of piling
+        // up threads that wait on the same wedged engine.
+        if ocr_paused() {
+            system_error = Some("OCR unavailable".into());
+        } else {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let job = OcrJob {
+                path: path.clone(),
+                language: s.ocr_language.clone(),
+                reply: sender,
+            };
+            if ocr_sender().send(job).is_err() {
+                system_error = Some("OCR worker stopped".into());
+            } else {
+                match receiver.recv_timeout(std::time::Duration::from_millis(5000)) {
+                    Ok(Ok((result, language))) => {
+                        words = result;
+                        used_ocr_language = Some(language);
+                    }
+                    Ok(Err(error)) => system_error = Some(error),
+                    Err(_) => {
+                        *OCR_UNAVAILABLE_AT.lock().unwrap() = Some(Instant::now());
+                        log::warn!(
+                            "Ctrlword OCR id={id} context={context} stopped answering; using Tesseract for two minutes"
+                        );
+                        system_error = Some("OCR timed out".into());
+                    }
+                }
             }
-            Err(error) => system_error = Some(error),
         }
         let _ = std::fs::remove_file(path);
     }
@@ -1047,6 +1075,42 @@ pub fn capture(app: tauri::AppHandle, id: u64, context: bool) -> Result<CaptureR
         base64: STANDARD.encode(bytes),
         system_error,
     })
+}
+
+struct OcrJob {
+    path: std::path::PathBuf,
+    language: String,
+    reply: std::sync::mpsc::Sender<Result<(Vec<OcrWord>, String), String>>,
+}
+static OCR_QUEUE: std::sync::Mutex<Option<std::sync::mpsc::Sender<OcrJob>>> = std::sync::Mutex::new(None);
+static OCR_UNAVAILABLE_AT: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+const OCR_HOLD_OFF: std::time::Duration = std::time::Duration::from_secs(120);
+
+fn ocr_paused() -> bool {
+    let mut paused = OCR_UNAVAILABLE_AT.lock().unwrap();
+    match *paused {
+        Some(at) if at.elapsed() < OCR_HOLD_OFF => true,
+        Some(_) => {
+            *paused = None;
+            false
+        }
+        None => false,
+    }
+}
+
+fn ocr_sender() -> std::sync::mpsc::Sender<OcrJob> {
+    let mut queue = OCR_QUEUE.lock().unwrap();
+    if let Some(sender) = queue.as_ref() {
+        return sender.clone();
+    }
+    let (sender, receiver) = std::sync::mpsc::channel::<OcrJob>();
+    std::thread::spawn(move || {
+        while let Ok(job) = receiver.recv() {
+            let _ = job.reply.send(recognize_file(&job.path, &job.language));
+        }
+    });
+    *queue = Some(sender.clone());
+    sender
 }
 
 fn recognize_file(path: &std::path::Path, language: &str) -> Result<(Vec<OcrWord>, String), String> {

@@ -1,5 +1,9 @@
 use super::Point;
 
+fn is_generic_modifier(code: i32) -> bool {
+    matches!(code, 0x10 | 0x11 | 0x12)
+}
+
 /// Recognize one clean modifier tap without stealing ordinary keyboard events.
 #[derive(Default)]
 pub struct TriggerGesture {
@@ -17,7 +21,10 @@ impl TriggerGesture {
         chord: bool,
     ) -> Option<Point> {
         if code != trigger {
-            if down && self.down {
+            // Windows reports the generic modifier (VK_CONTROL) next to the
+            // sided one (VK_LCONTROL) on some keyboards and remappers. Those
+            // are the trigger itself, not a chord, or every tap would be lost.
+            if down && self.down && !is_generic_modifier(code) {
                 self.used = true;
             }
             return None;
@@ -78,6 +85,16 @@ mod tests {
         assert!(gesture
             .key(CTRL, false, CTRL, Point::default(), false)
             .is_none());
+    }
+    #[test]
+    fn the_generic_modifier_next_to_the_sided_one_is_not_a_chord() {
+        let mut gesture = TriggerGesture::default();
+        let p = Point { x: 5, y: 6 };
+        assert!(gesture.key(CTRL, true, CTRL, p, false).is_none());
+        // Some keyboards report VK_CONTROL alongside VK_LCONTROL.
+        assert!(gesture.key(0x11, true, CTRL, p, false).is_none());
+        assert!(gesture.key(0x11, false, CTRL, p, false).is_none());
+        assert_eq!(gesture.key(CTRL, false, CTRL, p, false).unwrap().x, 5);
     }
     #[test]
     fn mouse_gestures_and_setting_changes_cancel_a_pending_tap() {
